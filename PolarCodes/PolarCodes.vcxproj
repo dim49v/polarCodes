@@ -143,11 +143,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Encoder.h" />
+    <ClInclude Include="PolarCodes.h" />
     <ClInclude Include="Resources.h" />
     <ClInclude Include="SCDecoder.h" />
     <ClInclude Include="SCDecoderMinsum.h" />
+    <ClInclude Include="SCLDecoderMinsum.h" />
   </ItemGroup>
   <ItemGroup>
+    <Text Include="conf.txt" />
     <Text Include="pc.txt" />
   </ItemGroup>
   <ItemGroup>

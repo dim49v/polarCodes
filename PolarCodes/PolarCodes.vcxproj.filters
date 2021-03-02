@@ -32,10 +32,19 @@
     <ClInclude Include="SCDecoder.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="PolarCodes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SCLDecoderMinsum.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="pc.txt">
       <Filter>Resource Files</Filter>
+    </Text>
+    <Text Include="conf.txt">
+      <Filter>Source Files</Filter>
     </Text>
   </ItemGroup>
   <ItemGroup>

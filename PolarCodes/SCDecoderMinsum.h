@@ -18,43 +18,49 @@ namespace SCDecoderMinsum {
         return r2 + r1 * (1 - b * 2);
     }
 
-    std::vector<int> DecodeNode(const std::vector<double>& l, const std::vector<int>& FrozenBits, std::vector<int>& sol) {
-        if (l.size() == 2) {
+    void DecodeNode(int n, int m, int& solSize, double** decTree1, int** decTree2, int* sol, const std::vector<int>& frozenBits) {
+        if (2 << m == n) {
             int u1, u2;
-            u1 = FrozenBits[sol.size()] != -1
-                ? FrozenBits[sol.size()]
-                : Decodef(l[0], l[1]) >= 0 ? 0 : 1;
-            sol.push_back(u1);
-            u2 = FrozenBits[sol.size()] != -1
-                ? FrozenBits[sol.size()]
-                : Decodeg(l[0], l[1], u1) >= 0 ? 0 : 1;
-            sol.push_back(u2);
-            return { u1 ^ u2, u2 };
+            u1 = frozenBits[solSize] != -1
+                ? frozenBits[solSize]
+                : Decodef(decTree1[m][0], decTree1[m][1]) > 0 ? 0 : 1;
+            sol[solSize] = u1;
+            solSize++;
+            u2 = frozenBits[solSize] != -1
+                ? frozenBits[solSize]
+                : Decodeg(decTree1[m][0], decTree1[m][1], u1) > 0 ? 0 : 1;
+            sol[solSize] = u2;
+            solSize++;
+            decTree2[m][0] = u1 ^ u2;
+            decTree2[m][1] = u2;
+            return;
         }
         else {
-            std::vector<double> l1(l.size() / 2);
-            std::vector<double> l2(l.size() / 2);
-            for (int i = 0; i < l.size(); i+=2) {
-                l1[i/2] = Decodef(l[i], l[i + 1]);
+            int nodeSize = n >> m;
+            for (int i = 0; i < nodeSize; i += 2) {
+                decTree1[m + 1][i / 2] = Decodef(decTree1[m][i], decTree1[m][i + 1]);
             }
-            std::vector<int> v1 = DecodeNode(l1, FrozenBits, sol);
-            for (int i = 0; i < l.size(); i+=2) {
-                l2[i/2] = Decodeg(l[i], l[i + 1], v1[i/2]);
+            DecodeNode(n, m + 1, solSize, decTree1, decTree2, sol, frozenBits);
+            for (int i = 0; i < nodeSize; i += 2) {
+                decTree2[m][i] = decTree2[m + 1][i / 2];
+                decTree1[m + 1][i / 2] = Decodeg(decTree1[m][i], decTree1[m][i + 1], decTree2[m][i]);
             }
-            std::vector<int> v2 = DecodeNode(l2, FrozenBits, sol);
-            std::vector<int> v3(v1.size() * 2);
-            for (int i = 0; i < v3.size(); i += 2) {
-                v3[i] = v1[i / 2] ^ v2[i / 2];
-                v3[i + 1] = v2[i / 2];
+            DecodeNode(n, m + 1, solSize, decTree1, decTree2, sol, frozenBits);
+            for (int i = 0; i < nodeSize; i += 2) {
+                decTree2[m][i] = decTree2[m][i] ^ decTree2[m + 1][i / 2];
+                decTree2[m][i + 1] = decTree2[m + 1][i / 2];
             }
-            return v3;
+            return;
         }
     }
 
-    std::vector<int> Decode(const std::vector<double>& c, const std::vector<int>& FrozenBits) {
-        std::vector<int> sol(0);
-        DecodeNode(c, FrozenBits, sol);
+    void Decode(int n, double* c, double** decTree1, int** decTree2, int* sol, const std::vector<int>& frozenBits) {
+        for (int i = 0; i < n; i++) {
+            decTree1[0][i] = c[i];
+        }
+        int solSize = 0;
+        DecodeNode(n, 0, solSize, decTree1, decTree2, sol, frozenBits);
 
-        return sol;
+        return;
     }
 }

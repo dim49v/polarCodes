@@ -10,59 +10,76 @@
 #include <time.h>
 #include "Resources.h"
 
-double Awgn(std::normal_distribution<double>& distributionN, int s) {
-    return distributionN(eng) + s;
+double Awgn(std::normal_distribution<double>& distributionN) {
+    return distributionN(eng);
 }
 
-std::vector<int> AddFrozenBits(const std::vector<int>& v, const std::vector<int>& infIndexes, const std::vector<int>& frozenBits) {
-    std::vector<int> c(frozenBits.size() + v.size());
+void AddFrozenBits(int* xInf, int* x, int n, const std::vector<int>& infIndexes, const std::vector<int>& frozenBits) {
     int u = 0;
     int y = 0;
-    for (int i = 0; i < c.size(); i++)
+    for (int i = 0; i < n; i++)
     {
         if (u < infIndexes.size() && i == infIndexes[u]) {
-            c[i] = v[u];
+            x[i] = xInf[u];
             u++;
         }
         else {
-            c[i] = frozenBits[y];
+            x[i] = frozenBits[y];
             y++;
         }
     }
 
-    return c;
+    return;
 }
 
-std::vector<double> Transform(const std::vector<int>& v, std::normal_distribution<double>& distributionN) {
-    std::vector<double> c(v.size());
-    for (int i = 0; i < c.size(); i++) {
-        c[i] = Awgn(distributionN, (v[i] == 0 ? 1 : -1));
+void Transform(int n, int* c, double* res, std::normal_distribution<double>& distributionN) {
+    for (int i = 0; i < n; i++) {
+        res[i] = (c[i] == 0 ? 1 : -1) + Awgn(distributionN);
     }
 
-    return c;
+    return;
 }
 
 std::vector<int> FrozenBits(int n, const std::vector<int>& infIndexes, const std::vector<int>& frozenBits) {
-    std::vector<int> c(infIndexes.size(), -1);
-    return AddFrozenBits(c, infIndexes, frozenBits);
+    std::vector<int> c(infIndexes.size() + frozenBits.size());
+    int* xInf = new int[infIndexes.size()];
+    int* x = new int[infIndexes.size() + frozenBits.size()];
+    for (int i = 0; i < infIndexes.size(); i++) {
+        xInf[i] = -1;
+    }
+    AddFrozenBits(xInf, x, n, infIndexes, frozenBits);
+    for (int i = 0; i < c.size(); i++) {
+        c[i] = x[i];
+    }
+    return c;
 }
 
-std::vector<int> EncodeNode(const std::vector<int>& c) {
-    if (c.size() == 2) {
-        return { c[0] ^ c[1], c[1] };
+void EncodeNode(int n, int m, int** encTree) {
+    if (2 << m == n) {
+        encTree[m][0] ^= encTree[m][1];
+        return ;
     }
-    std::vector<int> v(c);
-    v = ReverseShuffle(v);
-    int n = c.size() / 2;
-    std::vector<int> x1 = EncodeNode(std::vector<int>(v.begin(), v.begin() + n));
-    std::vector<int> x2 = EncodeNode(std::vector<int>(v.begin() + n, v.end()));
-    for (int i = 0; i < n; i++) {
-        x1[i] ^= x2[i];
+    int nodeSize = n >> (m + 1);
+    ReverseShuffle(nodeSize * 2, encTree[m]);
+    for (int i = 0; i < nodeSize; i++) {
+        encTree[m + 1][i] = encTree[m][i];
     }
-    x1.insert(x1.end(), x2.begin(), x2.end());
-    return x1;
+    EncodeNode(n, m + 1, encTree);
+    for (int i = 0; i < nodeSize; i++) {
+        encTree[m][i] = encTree[m + 1][i];
+        encTree[m + 1][i] = encTree[m][i + nodeSize];
+    }
+    EncodeNode(n, m + 1, encTree);
+    for (int i = 0; i < nodeSize; i++) {
+        encTree[m][i] ^= encTree[m + 1][i];
+        encTree[m][i + nodeSize] = encTree[m + 1][i];
+    }
+    return;
 }
-std::vector<int> Encode(const std::vector<int>& c) {
-    std::vector<int> v(c);
-    return EncodeNode(v);;
+void Encode(int n, int* c, int** encTree) {
+    for (int i = 0; i < n; i++) {
+        encTree[0][i] = c[i];
+    }
+    EncodeNode(n, 0, encTree);
+    return;
 }
