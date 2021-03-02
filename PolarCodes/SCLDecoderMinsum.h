@@ -145,7 +145,7 @@ namespace SCLDecoderMinsum {
                 arrayPointer_C[m][ss][i][0] = arrayPointer_C[m][s][i][0];
                 arrayPointer_C[m][ss][i][1] = arrayPointer_C[m][s][i][1];
             }
-            arrayReferenceCount[m][ss]--;
+            arrayReferenceCount[m][s]--;
             arrayReferenceCount[m][ss] = 1;
             pathIndexToArrayIndex[m][l] = ss;
         }
@@ -328,9 +328,9 @@ namespace SCLDecoderMinsum {
             switch (crc_)
             {
             case 8:
-                crcRes = Crc8(sol, k_ - crc_);
+                crcRes = Crc8(sol, k_);
                 for (int u = 1; u <= 8; u++) {
-                    if (sol[k_ - u] != (crcRes & 0x01)) {
+                    if (sol[k_ + crc_ - u] != (crcRes & 0x01)) {
                         isTrue = false;
                         break;
                     }
@@ -338,9 +338,9 @@ namespace SCLDecoderMinsum {
                 }
                 break;
             case 16:
-                crcRes = Crc16(sol, k_ - crc_);
+                crcRes = Crc16(sol, k_);
                 for (int u = 1; u <= 16; u++) {
-                    if (sol[k_ - u] != (crcRes & 0x0001)) {
+                    if (sol[k_ + crc_ - u] != (crcRes & 0x0001)) {
                         isTrue = false;
                         break;
                     }

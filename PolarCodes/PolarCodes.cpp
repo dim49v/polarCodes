@@ -96,7 +96,7 @@ void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, doub
     double sigma;
     std::normal_distribution<double> distributionN;
     int m = (int)log2(n);
-    int* xInf = new int[k];
+    int* xInf = new int[k + crc];
     int* x = new int[n];
     double* xTransf = new double[n];
     int* dec = new int[n];
@@ -120,39 +120,34 @@ void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, doub
         SCLDecoderMinsum::InitializeDataStructures(n, L, k, crc);
     }
     for (int snri = 0; snri < snr.size(); snri++) {
-        sigma = sqrt(n / (2. * (k - crc) * pow(10, snr[snri] / 10)));
+        sigma = sqrt(n / (2. * k * pow(10, snr[snri] / 10)));
         distributionN = std::normal_distribution<double>(0, sigma);
-        std::vector<int> infIndexes = zComputer == 1 ? InfIndexesBEC(n, k) : InfIndexesAWGN(n, k, sigma);
-        std::vector<int> frozenBits(n - k);
+        std::vector<int> infIndexes = zComputer == 1 ? InfIndexesBEC(n, k) : InfIndexesAWGN(n, k + crc, sigma);
+        std::vector<int> frozenBits(n - k - crc);
         std::vector<int> shuffledFrozenBits = FrozenBits(n, infIndexes, frozenBits);
         int er = 0;
         for (int i = 0; i < loop; i++) {
+            for (int u = 0; u < k; u++) {
+                xInf[u] = distributionU(eng);
+            }
             if (crc > 0) {
-                for (int u = 0; u < k - crc; u++) {
-                    xInf[u] = distributionU(eng);
-                }
                 unsigned short crcRes;
                 switch (crc)
                 {
                 case 8:
-                    crcRes = Crc8(xInf, k - crc);
+                    crcRes = Crc8(xInf, k);
                     for (int u = 1; u <= 8; u++) {
-                        xInf[k - u] = crcRes & 0x01;
+                        xInf[k + crc - u] = crcRes & 0x01;
                         crcRes >>= 1;
                     }
                     break;
                 case 16:
-                    crcRes = Crc16(xInf, k - crc);
+                    crcRes = Crc16(xInf, k);
                     for (int u = 1; u <= 16; u++) {
-                        xInf[k - u] = crcRes & 0x0001;
+                        xInf[k + crc - u] = crcRes & 0x0001;
                         crcRes >>= 1;
                     }
                     break;
-                }
-            }
-            else {
-                for (int u = 0; u < k; u++) {
-                    xInf[u] = distributionU(eng);
                 }
             }
 
@@ -191,9 +186,12 @@ void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, doub
                 break;
             }
             tAll += clock() - tSt;
+            if ((i + 1) % (loop / 10) == 0) {
+                std::cout << (loop - i) / (loop / 10) << " ";
+            }
         }
         res.push_back(std::pair<double, std::pair<double, double>>(snr[snri], std::pair<double, double>((double)er / loop, tAll)));
-        std::cout << snr[snri] << '\n';
+        std::cout << '\n' << snr[snri] << '\n';
     }
 }
 
@@ -232,7 +230,8 @@ int main()
         "SC_" +
         std::to_string(n) +
         "_" + std::to_string(k) +
-        "_" + (zComputer == 1 ? "BEC" : "AWGN") +
+        "_L" + std::to_string(L) +
+        "_CRC" + std::to_string(crc) +
         "_" + std::to_string(time(0)) + 
         ".txt");
     fout << endT - startT << '\n';
