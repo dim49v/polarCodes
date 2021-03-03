@@ -191,7 +191,7 @@ void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, doub
             }
         }
         res.push_back(std::pair<double, std::pair<double, double>>(snr[snri], std::pair<double, double>((double)er / loop, tAll)));
-        std::cout << '\n' << snr[snri] << '\n';
+        std::cout << '\n' << snr[snri] << " " << (double)er / loop << '\n';
     }
 }
 

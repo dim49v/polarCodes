@@ -15,7 +15,7 @@
 namespace SCLDecoderMinsum {
     std::vector<int> inactivePathIndices;
     bool* activePath;
-    double**** arrayPointer_P;
+    double*** arrayPointer_P;
     int**** arrayPointer_C;
     int** pathIndexToArrayIndex;
     std::vector<int>* inactiveArrayIndices;
@@ -26,8 +26,8 @@ namespace SCLDecoderMinsum {
     int k_;
     int crc_;
     double** probForks;
-    double* median;
-    double* sortedMedian;
+    double* metric;
+    double* sortedMetric;
 
     inline double Decodef(double r1, double r2) {
         return std::min(abs(r1), abs(r2)) * (r1 * r2 < 0 ? -1. : 1.);
@@ -44,26 +44,25 @@ namespace SCLDecoderMinsum {
         crc_ = crc;
         inactivePathIndices.reserve(L_);
         activePath = new bool[L_];
-        arrayPointer_P = new double*** [m_ + 1];
+        arrayPointer_P = new double** [m_ + 1];
         arrayPointer_C = new int*** [m_ + 1];
         pathIndexToArrayIndex = new int* [m_ + 1];
         inactiveArrayIndices = new std::vector<int>[m_ + 1];
         arrayReferenceCount = new int* [m_ + 1];
         probForks = new double* [L_];
-        median = new double[L_];
-        sortedMedian = new double[2 * L_];
+        metric = new double[L_];
+        sortedMetric = new double[2 * L_];
         unsigned int size = n;
         for (int i = 0; i < m_ + 1; i++) {
             pathIndexToArrayIndex[i] = new int[L_];
             inactiveArrayIndices[i].reserve(L_);
             arrayReferenceCount[i] = new int[L_];
-            arrayPointer_P[i] = new double** [L_];
+            arrayPointer_P[i] = new double* [L_];
             arrayPointer_C[i] = new int** [L_];
             for (int u = 0; u < L_; u++) {
-                arrayPointer_P[i][u] = new double* [size];
+                arrayPointer_P[i][u] = new double [size];
                 arrayPointer_C[i][u] = new int* [size];
                 for (int j = 0; j < size; j++) {
-                    arrayPointer_P[i][u][j] = new double[2];
                     arrayPointer_C[i][u][j] = new int[2];
                 }
                 arrayReferenceCount[i][u] = 0;
@@ -102,7 +101,7 @@ namespace SCLDecoderMinsum {
             pathIndexToArrayIndex[i][l] = s;
             arrayReferenceCount[i][s] = 1;
         }
-        median[l] = 0;
+        metric[l] = 0;
         return l;
     }
     int clonePath(int l) {
@@ -115,7 +114,7 @@ namespace SCLDecoderMinsum {
             pathIndexToArrayIndex[i][ll] = s;
             arrayReferenceCount[i][s]++;
         }   
-        median[ll] = median[l];
+        metric[ll] = metric[l];
         return ll;
     }
     void killPath(int l) {
@@ -141,7 +140,7 @@ namespace SCLDecoderMinsum {
             ss = inactiveArrayIndices[m].back();
             inactiveArrayIndices[m].pop_back();
             for (int i = 0; i < size; i++) {
-                arrayPointer_P[m][ss][i][0] = arrayPointer_P[m][s][i][0];
+                arrayPointer_P[m][ss][i] = arrayPointer_P[m][s][i];
                 arrayPointer_C[m][ss][i][0] = arrayPointer_C[m][s][i][0];
                 arrayPointer_C[m][ss][i][1] = arrayPointer_C[m][s][i][1];
             }
@@ -152,7 +151,7 @@ namespace SCLDecoderMinsum {
         
         return ss;
     }
-    double** getArrayPointer_P(int m, int l) {
+    double* getArrayPointer_P(int m, int l) {
         int ss = copyContent(m, l);
         return arrayPointer_P[m][ss];
     }
@@ -169,8 +168,8 @@ namespace SCLDecoderMinsum {
         if (phase % 2 == 0) {
             recursivelyCalcP(m - 1, w);
         }
-        double** p1;
-        double** p2;
+        double* p1;
+        double* p2;
         int** c1;
         int size;
         for (int i = 0; i < L_; i++) {
@@ -183,10 +182,10 @@ namespace SCLDecoderMinsum {
             size = n_ >> m;
             for (int u = 0; u < size; u++) {
                 if (phase % 2 == 0) {
-                    p1[u][0] = Decodef(p2[2 * u][0], p2[2 * u + 1][0]);
+                    p1[u] = Decodef(p2[2 * u], p2[2 * u + 1]);
                 }
                 else {
-                    p1[u][0] = Decodeg(p2[2 * u][0], p2[2 * u + 1][0], c1[u][0]);
+                    p1[u] = Decodeg(p2[2 * u], p2[2 * u + 1], c1[u][0]);
                 }
             }
         }
@@ -217,16 +216,16 @@ namespace SCLDecoderMinsum {
     }
 
     void continuePaths_UnfrozenBit(int phase) {
-        double** Pm;
+        double* Pm;
         int** cm;
         int activeCount = 0;
         for (int i = 0; i < L_; i++) {
             if (activePath[i]) {
                 Pm = getArrayPointer_P(m_, i);
-                probForks[i][0] = median[i] + additionPM(Pm[0][0], 0);
-                probForks[i][1] = median[i] + additionPM(Pm[0][0], 1);
-                sortedMedian[2 * i] = probForks[i][0];
-                sortedMedian[2 * i + 1] = probForks[i][1];
+                probForks[i][0] = metric[i] + additionPM(Pm[0], 0);
+                probForks[i][1] = metric[i] + additionPM(Pm[0], 1);
+                sortedMetric[2 * i] = probForks[i][0];
+                sortedMetric[2 * i + 1] = probForks[i][1];
                 activeCount++;
             }
         }
@@ -238,14 +237,14 @@ namespace SCLDecoderMinsum {
                     int ii = clonePath(i);
                     cm = getArrayPointer_C(m_, ii);
                     cm[0][phase % 2] = 1;              
-                    median[i] = probForks[i][0];
-                    median[ii] = probForks[i][1];
+                    metric[i] = probForks[i][0];
+                    metric[ii] = probForks[i][1];
                 }
             }
         }
         else {
-            std::sort(sortedMedian, sortedMedian + 2 * L_);
-            double med = (sortedMedian[L_ - 1] + sortedMedian[L_]) / 2;
+            std::sort(sortedMetric, sortedMetric + 2 * L_);
+            double med = (sortedMetric[L_ - 1] + sortedMetric[L_]) / 2;
             for (int i = 0; i < L_; i++) {
                 if (probForks[i][0] > med && probForks[i][1] > med) {
                     killPath(i);
@@ -261,29 +260,29 @@ namespace SCLDecoderMinsum {
                     int ii = clonePath(i);
                     cm = getArrayPointer_C(m_, ii);
                     cm[0][phase % 2] = 1;
-                    median[i] = probForks[i][0];
-                    median[ii] = probForks[i][1];
+                    metric[i] = probForks[i][0];
+                    metric[ii] = probForks[i][1];
                 }
                 else if (probForks[i][0] < med) {
                     cm[0][phase % 2] = 0;
-                    median[i] = probForks[i][0];
+                    metric[i] = probForks[i][0];
                 }
                 else {
                     cm[0][phase % 2] = 1;
-                    median[i] = probForks[i][1];
+                    metric[i] = probForks[i][1];
                 }
             }
         }
     }
     bool compareList(int a, int b) {
-        return median[a] < median[b];
+        return metric[a] < metric[b];
     }
     void Decode(int n, int L, double* c, int** decTree2, int* sol, const std::vector<int>& frozenBits) {
         int l = assignInitialPath();
-        double** pm = getArrayPointer_P(0, l);
+        double* pm = getArrayPointer_P(0, l);
         int** cm;
         for (int i = 0; i < n; i++) {
-            pm[i][0] = c[i];
+            pm[i] = c[i];
         }          
         for (int i = 0; i < n; i++) {
             recursivelyCalcP(m_, i);
@@ -295,7 +294,7 @@ namespace SCLDecoderMinsum {
                     cm = getArrayPointer_C(m_, u);
                     pm = getArrayPointer_P(m_, u);
                     cm[0][i % 2] = frozenBits[i];
-                    median[u] += additionPM(pm[0][0], frozenBits[i]);
+                    metric[u] += additionPM(pm[0], frozenBits[i]);
                 }
             }
             else {
@@ -308,11 +307,11 @@ namespace SCLDecoderMinsum {
         int l0 = -1;
         double p0 = DBL_MAX;
         for (int i = 0; i < L_; i++) {
-            sortedMedian[i] = i;
+            sortedMetric[i] = i;
         }
-        std::sort(sortedMedian, sortedMedian + L_, compareList);
+        std::sort(sortedMetric, sortedMetric + L_, compareList);
         for (int i = 0; i < L_; i++) { 
-            cm = getArrayPointer_C(0, sortedMedian[i]);
+            cm = getArrayPointer_C(0, sortedMetric[i]);
             for (int u = 0; u < n_; u++) {
                 sol[u] = cm[u][0]; 
             }       
