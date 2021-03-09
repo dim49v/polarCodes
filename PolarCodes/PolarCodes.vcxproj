@@ -142,12 +142,12 @@
     <ClCompile Include="PolarCodes.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Encoder.h" />
+    <ClInclude Include="Encoder.cpp" />
     <ClInclude Include="PolarCodes.h" />
-    <ClInclude Include="Resources.h" />
-    <ClInclude Include="SCDecoder.h" />
-    <ClInclude Include="SCDecoderMinsum.h" />
-    <ClInclude Include="SCLDecoderMinsum.h" />
+    <ClInclude Include="Resources.cpp" />
+    <ClInclude Include="SCDecoder.cpp" />
+    <ClInclude Include="SCDecoderMinsum.cpp" />
+    <ClInclude Include="SCLDecoderMinsum.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="conf.txt" />

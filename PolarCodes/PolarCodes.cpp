@@ -7,11 +7,11 @@
 #include <string> 
 #include <time.h>
 
-#include "Resources.h"
-#include "SCLDecoderMinsum.h"
-#include "SCDecoderMinsum.h"
-#include "SCDecoder.h"
-#include "Encoder.h"
+#include "Resources.cpp"
+#include "SCLDecoderMinsum.cpp"
+#include "SCDecoderMinsum.cpp"
+#include "SCDecoder.cpp"
+#include "Encoder.cpp"
 
 std::mutex mu;
 
@@ -91,7 +91,7 @@ std::vector<int> InfIndexesBEC(int n, int k) {
     return c;
 }
 
-void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, double>>>& res, int decoder, int zComputer, int loop, std::vector<double>& snr, int L=1, int crc = 0) {
+void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>& res, int decoder, int zComputer, int loop, std::vector<double>& snr, int L=1, int crc = 0) {
     std::uniform_int_distribution<int> distributionU(0, 1);
     double sigma;
     std::normal_distribution<double> distributionN;
@@ -125,8 +125,79 @@ void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, doub
         std::vector<int> infIndexes = zComputer == 1 ? InfIndexesBEC(n, k) : InfIndexesAWGN(n, k + crc, sigma);
         std::vector<int> frozenBits(n - k - crc);
         std::vector<int> shuffledFrozenBits = FrozenBits(n, infIndexes, frozenBits);
-        int er = 0;
-        for (int i = 0; i < loop; i++) {
+        int er = 0; 
+        switch (testType) {
+        case 1:
+            for (int i = 0; i < loop; i++) {
+                for (int u = 0; u < k; u++) {
+                    xInf[u] = distributionU(eng);
+                }
+                if (crc > 0) {
+                    unsigned short crcRes;
+                    switch (crc)
+                    {
+                    case 8:
+                        crcRes = Crc8(xInf, k);
+                        for (int u = 1; u <= 8; u++) {
+                            xInf[k + crc - u] = crcRes & 0x01;
+                            crcRes >>= 1;
+                        }
+                        break;
+                    case 16:
+                        crcRes = Crc16(xInf, k);
+                        for (int u = 1; u <= 16; u++) {
+                            xInf[k + crc - u] = crcRes & 0x0001;
+                            crcRes >>= 1;
+                        }
+                        break;
+                    }
+                }
+
+                AddFrozenBits(xInf, x, n, infIndexes, frozenBits);
+                Encode(n, x, encTree);
+                for (int u = 0; u < n; u++) {
+                    std::cout << encTree[0][u];
+                }
+                std::cout << "\n\n";
+                Transform(n, encTree[0], xTransf, distributionN);
+                switch (decoder)
+                {
+                case 1:
+                    SCDecoder::Decode(n, xTransf, decTree1, decTree2, dec, shuffledFrozenBits, sigma);
+                    for (int u = 0; u < n; u++) {
+                        if (x[u] != dec[u]) {
+                            er++;
+                            break;
+                        }
+                    }
+                    break;
+                case 2:
+                    SCDecoderMinsum::Decode(n, xTransf, decTree1, decTree2, dec, shuffledFrozenBits);
+                    for (int u = 0; u < n; u++) {
+                        if (x[u] != dec[u]) {
+                            er++;
+                            break;
+                        }
+                    }
+                    break;
+                case 3:
+                    SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits);
+                    for (int u = 0; u < k; u++) {
+                        if (xInf[u] != dec[u]) {
+                            er++;
+                            break;
+                        }
+                    }
+                    break;
+                }
+                if ((i + 1) % (loop / 10) == 0) {
+                    std::cout << (loop - i) / (loop / 10) << " ";
+                }
+            }
+            res.push_back(std::pair<double, double>(snr[snri], (double)er / loop));
+            std::cout << '\n' << snr[snri] << " " << (double)er / loop << '\n';
+            break;
+        case 2:
             for (int u = 0; u < k; u++) {
                 xInf[u] = distributionU(eng);
             }
@@ -158,77 +229,73 @@ void myThread(int n, int k, std::vector<std::pair<double, std::pair<double, doub
             switch (decoder)
             {
             case 1:
-                SCDecoder::Decode(n, xTransf, decTree1, decTree2, dec, shuffledFrozenBits, sigma);
-                for (int u = 0; u < n; u++) {
-                    if (x[u] != dec[u]) {
-                        er++;
-                        break;
-                    }
+                for (int i = 0; i < loop; i++) {
+                    SCDecoder::Decode(n, xTransf, decTree1, decTree2, dec, shuffledFrozenBits, sigma);
                 }
                 break;
             case 2:
-                SCDecoderMinsum::Decode(n, xTransf, decTree1, decTree2, dec, shuffledFrozenBits); 
-                for (int u = 0; u < n; u++) {
-                    if (x[u] != dec[u]) {
-                        er++;
-                        break;
-                    }
+                for (int i = 0; i < loop; i++) {
+                    SCDecoderMinsum::Decode(n, xTransf, decTree1, decTree2, dec, shuffledFrozenBits);
                 }
                 break;
             case 3:
-                SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits);
-                for (int u = 0; u < k; u++) {
-                    if (xInf[u] != dec[u]) {
-                        er++;
-                        break;
-                    }
+                for (int i = 0; i < loop; i++) {
+                    SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits);
                 }
                 break;
             }
             tAll += clock() - tSt;
-            if ((i + 1) % (loop / 10) == 0) {
-                std::cout << (loop - i) / (loop / 10) << " ";
-            }
+            res.push_back(std::pair<double, double>(snr[snri], tAll));
+            std::cout << '\n' << snr[snri] << " " << tAll << '\n';
         }
-        res.push_back(std::pair<double, std::pair<double, double>>(snr[snri], std::pair<double, double>((double)er / loop, tAll)));
-        std::cout << '\n' << snr[snri] << " " << (double)er / loop << '\n';
     }
 }
 
 int main()
 {
-    int n, k, decoder, zComputer, L, crc, loop, nth;
+    int testType, n, k, decoder, zComputer, L, crc, loop, nth;
     
     std::ifstream fin;
     fin.open("conf.txt");
+    std::cout << "Input test type FER (1), throughput (2)\n";
+    fin >> testType;
+    std::cout << testType << '\n';
     std::cout << "Input n, k, number of iteration\n";
     fin >> n >> k >> loop;
+    std::cout << n << " " << k << " " << loop << '\n';
     std::cout << "Select decoder: SC (1), SCMinsum (2), SCLMinsum (3)\n";
     fin >> decoder;
+    std::cout << decoder << '\n';
     std::cout << "Select zComputer: BEC (1), AWGN (2)\n";
     fin >> zComputer;
+    std::cout << zComputer << '\n';
     std::cout << "Input L\n";
     fin >> L;
+    std::cout << L << '\n';
     std::cout << "Input CRC\n";
     fin >> crc;
+    std::cout << crc << '\n';
     std::cout << "Input number of SNRb\n";
     fin >> nth;
+    std::cout << nth << '\n';
     std::vector<double> snr(nth);
     std::cout << "Input "<< nth << " SNRbs\n";
     for (int i = 0; i < nth; i++) {
         fin >> snr[i];
+        std::cout << snr[i] << " ";
     }
-    std::cout << "Running...\n";
+    std::cout << "\nRunning...\n\n";
     reverseShuffleMem = new int[n];
-    std::vector<std::pair<double, std::pair<double, double>>> res(0);
+    std::vector<std::pair<double, double>> res(0);
     int startT = clock();
-    myThread(n, k, res, decoder, zComputer, loop, snr, L, crc);
+    myThread(testType, n, k, res, decoder, zComputer, loop, snr, L, crc);
     int endT = clock();
     std::sort(res.begin(), res.end());
     std::ofstream fout;
     fout.open(
         "SC_" +
-        std::to_string(n) +
+        std::to_string(testType) +
+        "_" + std::to_string(n) +
         "_" + std::to_string(k) +
         "_L" + std::to_string(L) +
         "_CRC" + std::to_string(crc) +
@@ -236,6 +303,6 @@ int main()
         ".txt");
     fout << endT - startT << '\n';
     for (int i = 0; i < res.size(); i++) {
-        fout << res[i].first << '\t' << res[i].second.first << '\t' << res[i].second.second << '\n';
+        fout << res[i].first << '\t' << res[i].second << '\n';
     }
 }

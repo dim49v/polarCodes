@@ -55,7 +55,7 @@ namespace SCLDecoderMinsum {
     }  
     char Decodeg_char(char r1, char r2, int b) {
         int res = r2 + r1 * (1 - b * 2);
-        return abs(res) > 127 ? (res > 0 ? 127 : -128) : res;
+        return abs(res) > 127 ? (res > 0 ? 127 : -127) : res;
     }
 
     void InitializeDataStructures(int n, int L, int k, int crc) {
@@ -195,8 +195,8 @@ namespace SCLDecoderMinsum {
         char* p1;
         char* p2;
         int** c1;
-        int size;
-        char minP = 255;
+        int size = n_ >> m;;
+        //char minP = 255;
         for (int i = 0; i < L_; i++) {
             if (!activePath[i]) {
                 continue;
@@ -204,7 +204,6 @@ namespace SCLDecoderMinsum {
             p1 = getArrayPointer_P(m, i);
             p2 = getArrayPointer_P(m - 1, i);
             c1 = getArrayPointer_C(m, i);
-            size = n_ >> m;
             for (int u = 0; u < size; u++) {
                 if (phase % 2 == 0) {
                     p1[u] = Decodef_char(p2[2 * u], p2[2 * u + 1]);
@@ -237,7 +236,7 @@ namespace SCLDecoderMinsum {
     }
     unsigned char additionPM(char llr, int u) {
         char x = -(1 - 2 * u) * llr;
-        return x > 0 ? x : 0;
+        return x >= 0 ? x : 0;
     }
 
     void continuePaths_UnfrozenBit(int phase) {
@@ -288,15 +287,13 @@ namespace SCLDecoderMinsum {
                 }
                 else {
                     constForks[i][1] = false;
-                }
-            }
-            for (int i = 0; i < L_; i++) {
+                }      
                 if (!constForks[i][0] && !constForks[i][1]) {
                     killPath(i);
                 }
             }
             for (int i = 0; i < L_; i++) {
-                if (!activePath || (!constForks[i][0] && !constForks[i][1])) {
+                if (!activePath[i] || (!constForks[i][0] && !constForks[i][1])) {
                     continue;
                 }
                 cm = getArrayPointer_C(m_, i);
@@ -319,15 +316,12 @@ namespace SCLDecoderMinsum {
             }
         }
     }
-    bool compareList(int a, int b) {
-        return metric[a] < metric[b];
-    }
     void Decode(int n, int L, double* c, int** decTree2, int* sol, const std::vector<int>& frozenBits) {
         int l = assignInitialPath();
         char* pm = getArrayPointer_P(0, l);
         int** cm;
         for (int i = 0; i < n; i++) {
-            pm[i] = abs(c[i] * 64 + 0.25) > 127 ? (c[i] > 0 ? 127 : -128) : c[i] * 64 + 0.25;
+            pm[i] = abs(c[i] * 16 + 0.5) > 127 ? (c[i] > 0 ? 127 : -127) : c[i] * 16 + 0.5;
         }          
         for (int i = 0; i < n; i++) {
             recursivelyCalcP(m_, i);
@@ -349,14 +343,8 @@ namespace SCLDecoderMinsum {
                 recursivelyUpdateC(m_, i);
             }
         } 
-        int l0 = -1;
-        double p0 = DBL_MAX;
-        for (int i = 0; i < L_; i++) {
-            sortedMetric[i] = i;
-        }
-        std::sort(sortedMetric, sortedMetric + L_, compareList);
         for (int i = 0; i < L_; i++) { 
-            cm = getArrayPointer_C(0, sortedMetric[i]);
+            cm = getArrayPointer_C(0, i);
             for (int u = 0; u < n_; u++) {
                 sol[u] = cm[u][0]; 
             }

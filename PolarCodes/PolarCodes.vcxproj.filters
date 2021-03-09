@@ -20,22 +20,22 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="SCDecoderMinsum.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Resources.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Encoder.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SCDecoder.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="PolarCodes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="SCLDecoderMinsum.h">
+    <ClInclude Include="Encoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Resources.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SCDecoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SCDecoderMinsum.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SCLDecoderMinsum.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
