@@ -91,7 +91,7 @@ std::vector<int> InfIndexesBEC(int n, int k) {
     return c;
 }
 
-void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>& res, int decoder, int zComputer, int loop, std::vector<double>& snr, int L=1, int crc = 0) {
+void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>& res, int decoder, int zComputer, int loop, std::vector<double>& snr, int L, int crc, int qFraction) {
     std::uniform_int_distribution<int> distributionU(0, 1);
     double sigma;
     std::normal_distribution<double> distributionN;
@@ -155,10 +155,6 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
 
                 AddFrozenBits(xInf, x, n, infIndexes, frozenBits);
                 Encode(n, x, encTree);
-                for (int u = 0; u < n; u++) {
-                    std::cout << encTree[0][u];
-                }
-                std::cout << "\n\n";
                 Transform(n, encTree[0], xTransf, distributionN);
                 switch (decoder)
                 {
@@ -181,7 +177,7 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
                     }
                     break;
                 case 3:
-                    SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits);
+                    SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits, qFraction);
                     for (int u = 0; u < k; u++) {
                         if (xInf[u] != dec[u]) {
                             er++;
@@ -240,7 +236,7 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
                 break;
             case 3:
                 for (int i = 0; i < loop; i++) {
-                    SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits);
+                    SCLDecoderMinsum::Decode(n, L, xTransf, decTree2, dec, shuffledFrozenBits, qFraction);
                 }
                 break;
             }
@@ -253,7 +249,7 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
 
 int main()
 {
-    int testType, n, k, decoder, zComputer, L, crc, loop, nth;
+    int testType, n, k, decoder, zComputer, L, crc, loop, nth, qFraction;
     
     std::ifstream fin;
     fin.open("conf.txt");
@@ -275,6 +271,9 @@ int main()
     std::cout << "Input CRC\n";
     fin >> crc;
     std::cout << crc << '\n';
+    std::cout << "Input Q fraction\n";
+    fin >> qFraction;
+    std::cout << qFraction << '\n';
     std::cout << "Input number of SNRb\n";
     fin >> nth;
     std::cout << nth << '\n';
@@ -288,7 +287,7 @@ int main()
     reverseShuffleMem = new int[n];
     std::vector<std::pair<double, double>> res(0);
     int startT = clock();
-    myThread(testType, n, k, res, decoder, zComputer, loop, snr, L, crc);
+    myThread(testType, n, k, res, decoder, zComputer, loop, snr, L, crc, qFraction);
     int endT = clock();
     std::sort(res.begin(), res.end());
     std::ofstream fout;
