@@ -16,8 +16,8 @@
 namespace SCLDecoderMinsum {
     std::vector<int> inactivePathIndices;
     bool* activePath;
-    char*** arrayPointer_P;
-    char**** arrayPointer_C;
+    float*** arrayPointer_P;
+    int**** arrayPointer_C;
     int** pathIndexToArrayIndex;
     std::vector<int>* inactiveArrayIndices;
     int** arrayReferenceCount;
@@ -26,10 +26,10 @@ namespace SCLDecoderMinsum {
     int m_;
     int k_;
     int crc_;
-    int** probForks;
+    float** probForks;
     bool** constForks;
-    int* metric;
-    int* sortedMetric;
+    float* metric;
+    float* sortedMetric;
     char avxMaskArr[] {0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00, 0xff };
     //char* avxMaskArr1 = new char[32]{ 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
     //char* avxMaskArr2 = new char[32]{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -62,7 +62,14 @@ namespace SCLDecoderMinsum {
         __m256i sr = _mm256_or_si256(ss, maskF1);
         return _mm256_sign_epi8(mm, sr);
     }
-    double Decodeg(double r1, double r2, int b) {
+    __m256 f_avx_f(__m256 r1, __m256 r2) {
+        __m256 mr1 = _mm256_and_ps(r1, _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff)));
+        __m256 mr2 = _mm256_and_ps(r2, _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff)));
+        __m256 mm = _mm256_min_ps(mr1, mr2);
+        __m256 ss = _mm256_and_ps(_mm256_xor_ps(r1, r2), _mm256_castsi256_ps(_mm256_set1_epi32(0x80000000)));
+        return _mm256_or_ps(mm, ss);
+    }
+    float Decodeg(float r1, float r2, int b) {
         return r2 + r1 * (1 - b * 2);
     }  
     char Decodeg_char(char r1, char r2, char b) {
@@ -79,6 +86,11 @@ namespace SCLDecoderMinsum {
         __m256i mr4 = _mm256_adds_epi8(res, mr3);
         return mr4;
     }
+    __m256 g_avx_f(__m256 r1, __m256 r2, __m256i b) {
+        __m256i bb = _mm256_slli_epi32(b, 31);
+        __m256 mr1 = _mm256_xor_ps(r1, _mm256_castsi256_ps(bb));
+        return _mm256_add_ps(mr1, r2);
+    }
 
     void InitializeDataStructures(int n, int L, int k, int crc) {
         L_ = L;
@@ -88,27 +100,27 @@ namespace SCLDecoderMinsum {
         crc_ = crc;
         inactivePathIndices.reserve(L_);
         activePath = new bool[L_];
-        arrayPointer_P = new char** [m_ + 1];
-        arrayPointer_C = new char*** [m_ + 1];
+        arrayPointer_P = new float** [m_ + 1];
+        arrayPointer_C = new int*** [m_ + 1];
         pathIndexToArrayIndex = new int* [m_ + 1];
         inactiveArrayIndices = new std::vector<int>[m_ + 1];
         arrayReferenceCount = new int* [m_ + 1];
-        probForks = new int* [L_];
+        probForks = new float* [L_];
         constForks = new bool* [L_];
-        metric = new int[L_];
-        sortedMetric = new int[2 * L_];
+        metric = new float[L_];
+        sortedMetric = new float[2 * L_];
         unsigned int size = n;
         for (int i = 0; i < m_ + 1; i++) {
             pathIndexToArrayIndex[i] = new int[L_];
             inactiveArrayIndices[i].reserve(L_);
             arrayReferenceCount[i] = new int[L_];
-            arrayPointer_P[i] = new char* [L_];
-            arrayPointer_C[i] = new char** [L_];
+            arrayPointer_P[i] = new float* [L_];
+            arrayPointer_C[i] = new int** [L_];
             for (int u = 0; u < L_; u++) {
-                arrayPointer_P[i][u] = new char[size > 32 ? size : 32];
-                arrayPointer_C[i][u] = new char* [2];
+                arrayPointer_P[i][u] = new float[size > 8 ? size : 8];
+                arrayPointer_C[i][u] = new int* [2];
                 for (int j = 0; j < 2; j++) {
-                    arrayPointer_C[i][u][j] = new char[size > 32 ? size : 32];
+                    arrayPointer_C[i][u][j] = new int[size > 8 ? size : 8];
                 }
                 arrayReferenceCount[i][u] = 0;
                 inactiveArrayIndices[i].push_back(u);
@@ -118,7 +130,7 @@ namespace SCLDecoderMinsum {
         for (int i = 0; i < L_; i++) {
             activePath[i] = false;
             inactivePathIndices.push_back(i);
-            probForks[i] = new int[2];
+            probForks[i] = new float[2];
             constForks[i] = new bool[2];
         }
 
@@ -200,11 +212,11 @@ namespace SCLDecoderMinsum {
         
         return ss;
     }
-    char* getArrayPointer_P(int m, int l) {
+    float* getArrayPointer_P(int m, int l) {
         int ss = copyContent(m, l);
         return arrayPointer_P[m][ss];
     }
-    char** getArrayPointer_C(int m, int l) {
+    int** getArrayPointer_C(int m, int l) {
         int ss = copyContent(m, l);
         return arrayPointer_C[m][ss];
     }
@@ -217,11 +229,12 @@ namespace SCLDecoderMinsum {
         if (phase % 2 == 0) {
             recursivelyCalcP(m - 1, w);
         }
-        char* p1;
-        char* p2;
-        char** c1;
-        __m256i r1, r2, b, res1;
-        __m128i rr;
+        float* p1;
+        float* p2;
+        int** c1;
+        __m256 r1, r2, res1;
+        __m128 rr;
+        __m256i b;
         for (int i = 0; i < L_; i++) {
             if (!activePath[i]) {
                 continue;
@@ -232,44 +245,44 @@ namespace SCLDecoderMinsum {
             p2 = getArrayPointer_P(m - 1, i);
             c1 = getArrayPointer_C(m, i);
             if (phase % 2 == 0) {
-                for (int u = 0; u < size; u += 32) {
-                    r1 = _mm256_loadu_epi8(p2 + u);
-                    r2 = _mm256_loadu_epi8(p2 + size + u);
-                    res1 = f_avx(r1, r2);
-                    r1 = _mm256_shuffle_epi8(res1, avxMask1);
-                    res1 = _mm256_permute4x64_epi64(r1, 0xf8); // [1, 2, 3, 4] -> [1, 3 (, 4, 4)]
-                    rr = _mm256_castsi256_si128(res1);
-                    _mm_storeu_epi8(p1 + (u >> 1), rr);
+                for (int u = 0; u < size; u += 8) {
+                    r1 = _mm256_loadu_ps(p2 + u);
+                    r2 = _mm256_loadu_ps(p2 + size + u);
+                    res1 = f_avx_f(r1, r2);
+                    r1 = _mm256_shuffle_ps(res1, res1, 0xd8d8);
+                    res1 = _mm256_permutevar8x32_ps(r1, _mm256_set_epi32(0xff, 0xff, 0xff, 0xff, 0x05, 0x04, 0x01, 0x00)); // [1, 2, 3, 4] -> [1, 3 (, 4, 4)]
+                    rr = _mm256_castps256_ps128(res1);
+                    _mm_storeu_ps(p1 + (u >> 1), rr);
                     if (size2 > 0) {
-                        res1 = _mm256_permute4x64_epi64(r1, 0xfd); // [1, 2, 3, 4] -> [2, 4 (, 4, 4)]
-                        rr = _mm256_castsi256_si128(res1);
-                        _mm_storeu_epi8(p1 + (u >> 1) + size2, rr);
+                        res1 = _mm256_permutevar8x32_ps(r1, _mm256_set_epi32(0xff, 0xff, 0xff, 0xff, 0x07, 0x06, 0x03, 0x02)); // [1, 2, 3, 4] -> [2, 4 (, 4, 4)]
+                        rr = _mm256_castps256_ps128(res1);
+                        _mm_storeu_ps(p1 + (u >> 1) + size2, rr);
                     }
                 }
             } 
             else {
-                for (int u = 0; u < size; u += 32) {
-                    r1 = _mm256_loadu_epi8(p2 + u);
-                    r2 = _mm256_loadu_epi8(p2 + size + u);
-                    b = _mm256_loadu_epi8(c1[0] + u);
-                    res1 = g_avx(r1, r2, b);
-                    r1 = _mm256_shuffle_epi8(res1, avxMask1);
-                    res1 = _mm256_permute4x64_epi64(r1, 0xf8); // [1, 2, 3, 4] -> [1, 3 (, 4, 4)]
-                    rr = _mm256_castsi256_si128(res1);
-                    _mm_storeu_epi8(p1 + (u >> 1), rr);
+                for (int u = 0; u < size; u += 8) {
+                    r1 = _mm256_loadu_ps(p2 + u);
+                    r2 = _mm256_loadu_ps(p2 + size + u);
+                    b = _mm256_loadu_epi32(c1[0] + u);
+                    res1 = g_avx_f(r1, r2, b);
+                    r1 = _mm256_shuffle_ps(res1, res1, 0xd8d8);
+                    res1 = _mm256_permutevar8x32_ps(r1, _mm256_set_epi32(0xff, 0xff, 0xff, 0xff, 0x05, 0x04, 0x01, 0x00)); // [1, 2, 3, 4] -> [1, 3 (, 4, 4)]
+                    rr = _mm256_castps256_ps128(res1);
+                    _mm_storeu_ps(p1 + (u >> 1), rr);
                     if (size2 > 0) {
-                        res1 = _mm256_permute4x64_epi64(r1, 0xfd); // [1, 2, 3, 4] -> [2, 4 (, 4, 4)]
-                        rr = _mm256_castsi256_si128(res1);
-                        _mm_storeu_epi8(p1 + (u >> 1) + size2, rr);
+                        res1 = _mm256_permutevar8x32_ps(r1, _mm256_set_epi32(0xff, 0xff, 0xff, 0xff, 0x07, 0x06, 0x03, 0x02)); // [1, 2, 3, 4] -> [2, 4 (, 4, 4)]
+                        rr = _mm256_castps256_ps128(res1);
+                        _mm_storeu_ps(p1 + (u >> 1) + size2, rr);
                     }
                 }
             }
             //for (int u = 0; u < size; u++) {
             //    if (phase % 2 == 0) {
-            //        p1[(u % 2 * size2) + u / 2] = Decodef_char(p2[u], p2[size + u]);
+            //        p1[(u % 2 * size2) + u / 2] = Decodef(p2[u], p2[size + u]);
             //    }
             //    else {
-            //        p1[(u % 2 * size2) + u / 2] = Decodeg_char(p2[u], p2[size + u], c1[0][u]);
+            //        p1[(u % 2 * size2) + u / 2] = Decodeg(p2[u], p2[size + u], c1[0][u]);
             //    }
             //}
         }
@@ -277,8 +290,8 @@ namespace SCLDecoderMinsum {
     void recursivelyUpdateC(int m, int phase) {
         unsigned int size = n_ >> m;
         int w = phase / 2;
-        char** c1;
-        char** c2;
+        int** c1;
+        int** c2;
         for (int i = 0; i < L_; i++) {
             if (!activePath[i]) {
                 continue;
@@ -294,8 +307,8 @@ namespace SCLDecoderMinsum {
             recursivelyUpdateC(m - 1, w);
         }
     }
-    char additionPM(char llr, char u) {
-        char x = -(1 - 2 * u) * llr;
+    float additionPM(float llr, char u) {
+        float x = -(1 - 2 * u) * llr;
         return x >= 0 ? x : 0;
     }
 
@@ -304,9 +317,16 @@ namespace SCLDecoderMinsum {
             ? metric[a] < metric[b] 
             : probForks[a / 2][a % 2] < probForks[b / 2][b % 2];
     }
+
+    int compare(const void* x1, const void* x2)   // функция сравнения элементов массива
+    {
+        float x = (*(float*)x1 - *(float*)x2);
+        return x < 0 ? -1 : (x > 0 ? 1 : 0);              // если результат вычитания равен 0, то числа равны, < 0: x1 < x2; > 0: x1 > x2
+    }
+
     void continuePaths_UnfrozenBit(int phase) {
-        char* Pm;
-        char** cm;
+        float* Pm;
+        int** cm;
         if (phase == n_ - 1) {
             phase = phase;
         }
@@ -319,8 +339,8 @@ namespace SCLDecoderMinsum {
                 }
                 probForks[i][0] = metric[i] + additionPM(Pm[0], 0);
                 probForks[i][1] = metric[i] + additionPM(Pm[0], 1);
-                sortedMetric[2 * i] = 2 * i;
-                sortedMetric[2 * i + 1] = 2 * i + 1;
+                sortedMetric[2 * i] = probForks[i][0];
+                sortedMetric[2 * i + 1] = probForks[i][1];
                 activeCount++;
             }
         }
@@ -338,11 +358,24 @@ namespace SCLDecoderMinsum {
             }
         }
         else {
-            std::sort(sortedMetric, sortedMetric + 2 * L_, sortCMP);
-            double med = (double)(sortedMetric[L_ - 1] + sortedMetric[L_]) / 2;
+            std::qsort(sortedMetric, 2 * L_, 4, compare);// , sortCMP);
+            float med = (sortedMetric[L_ - 1] + sortedMetric[L_]) / 2;
+            int activeCount = 0;
             for (int i = 0; i < L_; i++) {
-                constForks[sortedMetric[i]/2][sortedMetric[i] % 2] = true;
-                constForks[sortedMetric[L_ + i] / 2][sortedMetric[L_ + i] % 2] = false;
+                if (probForks[i][0] <= med && activeCount < L_) {
+                    constForks[i][0] = true;
+                    activeCount++;
+                }
+                else {
+                    constForks[i][0] = false;
+                }
+                if (probForks[i][1] <= med && activeCount < L_) {
+                    constForks[i][1] = true;
+                    activeCount++;
+                }
+                else {
+                    constForks[i][1] = false;
+                }
             }
             for (int i = 0; i < L_; i++) {
                 if (!constForks[i][0] && !constForks[i][1]) {
@@ -375,13 +408,13 @@ namespace SCLDecoderMinsum {
     }
     void Decode(int n, int L, double* c, int** decTree2, int* sol, const std::vector<int>& frozenBits, int qFraction) {
         int l = assignInitialPath();
-        char* pm = getArrayPointer_P(0, l);
-        char** cm;
+        float* pm = getArrayPointer_P(0, l);
+        int** cm;
         int fraction = 2 << qFraction;
         int fillN = n_ >> 1;
         for (int i = 0; i < fillN; i++) {
-            pm[i] = round(c[2 * i] * fraction);
-            pm[fillN + i] = round(c[2 * i + 1] * fraction);
+            pm[i] = c[2 * i];
+            pm[fillN + i] = c[2 * i + 1];
         }          
         for (int i = 0; i < n_; i++) {
             recursivelyCalcP(m_, i);
