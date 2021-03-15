@@ -54,32 +54,34 @@ std::vector<int> FrozenBits(int n, const std::vector<int>& infIndexes, const std
     return c;
 }
 
-void EncodeNode(int n, int m, int** encTree) {
+void EncodeNode(int n, int m, int** encTree, bool withShuffle) {
     if (2 << m == n) {
         encTree[m][0] ^= encTree[m][1];
         return ;
     }
     int nodeSize = n >> (m + 1);
-    ReverseShuffle(nodeSize * 2, encTree[m]);
+    if (withShuffle) {
+        ReverseShuffle(nodeSize * 2, encTree[m]);
+    }
     for (int i = 0; i < nodeSize; i++) {
         encTree[m + 1][i] = encTree[m][i];
     }
-    EncodeNode(n, m + 1, encTree);
+    EncodeNode(n, m + 1, encTree, withShuffle);
     for (int i = 0; i < nodeSize; i++) {
         encTree[m][i] = encTree[m + 1][i];
         encTree[m + 1][i] = encTree[m][i + nodeSize];
     }
-    EncodeNode(n, m + 1, encTree);
+    EncodeNode(n, m + 1, encTree, withShuffle);
     for (int i = 0; i < nodeSize; i++) {
         encTree[m][i] ^= encTree[m + 1][i];
         encTree[m][i + nodeSize] = encTree[m + 1][i];
     }
     return;
 }
-void Encode(int n, int* c, int** encTree) {
+void Encode(int n, int* c, int** encTree, bool withShuffle) {
     for (int i = 0; i < n; i++) {
         encTree[0][i] = c[i];
     }
-    EncodeNode(n, 0, encTree);
+    EncodeNode(n, 0, encTree, withShuffle);
     return;
 }

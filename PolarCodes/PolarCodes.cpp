@@ -22,8 +22,8 @@ std::vector<double> ComputeZBEC(int n) {
     std::vector<double> c(n);
     std::vector<double> zn2 = ComputeZBEC(n / 2);
     for (int i = 0; i < n / 2; i++) {
-        c[2 * i] = 2. * zn2[i] - zn2[i] * zn2[i];
-        c[2 * i + 1] = zn2[i] * zn2[i];
+        c[i * 2] = 2. * zn2[i] - zn2[i] * zn2[i];
+        c[i * 2 + 1] = zn2[i] * zn2[i];
     }
     return c;
 }
@@ -123,6 +123,7 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
         sigma = sqrt(n / (2. * k * pow(10, snr[snri] / 10)));
         distributionN = std::normal_distribution<double>(0, sigma);
         std::vector<int> infIndexes = zComputer == 1 ? InfIndexesBEC(n, k) : InfIndexesAWGN(n, k + crc, sigma);
+        //PrintVector(infIndexes);
         std::vector<int> frozenBits(n - k - crc);
         std::vector<int> shuffledFrozenBits = FrozenBits(n, infIndexes, frozenBits);
         int er = 0; 
@@ -152,9 +153,8 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
                         break;
                     }
                 }
-
                 AddFrozenBits(xInf, x, n, infIndexes, frozenBits);
-                Encode(n, x, encTree);
+                Encode(n, x, encTree, (decoder != 3));
                 Transform(n, encTree[0], xTransf, distributionN);
                 switch (decoder)
                 {
@@ -219,7 +219,7 @@ void myThread(int testType, int n, int k, std::vector<std::pair<double, double>>
             }
 
             AddFrozenBits(xInf, x, n, infIndexes, frozenBits);
-            Encode(n, x, encTree);
+            Encode(n, x, encTree, (decoder != 3));
             Transform(n, encTree[0], xTransf, distributionN);
             tSt = clock();
             switch (decoder)
@@ -285,6 +285,7 @@ int main()
     }
     std::cout << "\nRunning...\n\n";
     reverseShuffleMem = new int[n];
+    reverseShuffleMemDouble = new double[n];
     std::vector<std::pair<double, double>> res(0);
     int startT = clock();
     myThread(testType, n, k, res, decoder, zComputer, loop, snr, L, crc, qFraction);
