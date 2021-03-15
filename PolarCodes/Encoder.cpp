@@ -63,14 +63,10 @@ void EncodeNode(int n, int m, int** encTree, bool withShuffle) {
     if (withShuffle) {
         ReverseShuffle(nodeSize * 2, encTree[m]);
     }
-    for (int i = 0; i < nodeSize; i++) {
-        encTree[m + 1][i] = encTree[m][i];
-    }
+    std::copy(encTree[m], encTree[m] + nodeSize, encTree[m + 1]);
     EncodeNode(n, m + 1, encTree, withShuffle);
-    for (int i = 0; i < nodeSize; i++) {
-        encTree[m][i] = encTree[m + 1][i];
-        encTree[m + 1][i] = encTree[m][i + nodeSize];
-    }
+    std::copy(encTree[m + 1], encTree[m + 1] + nodeSize, encTree[m]);
+    std::copy(encTree[m] + nodeSize, encTree[m] + nodeSize + nodeSize, encTree[m + 1]);
     EncodeNode(n, m + 1, encTree, withShuffle);
     for (int i = 0; i < nodeSize; i++) {
         encTree[m][i] ^= encTree[m + 1][i];

@@ -14,20 +14,22 @@
 #include "Encoder.cpp"
 
 namespace SCLDecoderMinsum {
-    std::vector<int> inactivePathIndices;
+    int* inactivePathIndices;
+    int inactivePathIndicesEnd = 0;
     bool* activePath;
-    float*** arrayPointer_P;
-    int**** arrayPointer_C;
-    int** pathIndexToArrayIndex;
-    std::vector<int>* inactiveArrayIndices;
-    int** arrayReferenceCount;
+    float** arrayPointer_P;
+    int*** arrayPointer_C;
+    int* pathIndexToArrayIndex;
+    int* inactiveArrayIndices;
+    int* inactiveArrayIndicesEnd;
+    int* arrayReferenceCount;
     int L_, L2_;
     int n_;
     int m_;
     int k_;
     int crc_;
-    float** probForks;
-    bool** constForks;
+    float* probForks;
+    bool* constForks;
     float* metric;
     float* sortedMetric;
     __m256 avxMaskAbs, avxMaskSign;
@@ -59,130 +61,115 @@ namespace SCLDecoderMinsum {
         m_ = std::log2(n);
         k_ = k;
         crc_ = crc;
-        inactivePathIndices.reserve(L_);
+        inactivePathIndices = new int[L_];
         activePath = new bool[L_];
-        arrayPointer_P = new float** [m_ + 1];
-        arrayPointer_C = new int*** [m_ + 1];
-        pathIndexToArrayIndex = new int* [m_ + 1];
-        inactiveArrayIndices = new std::vector<int>[m_ + 1];
-        arrayReferenceCount = new int* [m_ + 1];
-        probForks = new float* [L_];
-        constForks = new bool* [L_];
+        arrayReferenceCount = new int [(m_ + 1) * L_];
+        arrayPointer_P = new float* [(m_ + 1) * L_];
+        arrayPointer_C = new int** [(m_ + 1) * L_];
+        pathIndexToArrayIndex = new int [(m_ + 1) * L_];
+        inactiveArrayIndices = new int[(m_ + 1) * L_];
+        inactiveArrayIndicesEnd = new int[m_ + 1];
+        probForks = new float [L_ * 2];
+        constForks = new bool [L_ * 2];
         metric = new float[L_];
         sortedMetric = new float[L2_];
         unsigned int size = n;
         for (int i = 0; i < m_ + 1; i++) {
-            pathIndexToArrayIndex[i] = new int[L_];
-            inactiveArrayIndices[i].reserve(L_);
-            arrayReferenceCount[i] = new int[L_];
-            arrayPointer_P[i] = new float* [L_];
-            arrayPointer_C[i] = new int** [L_];
+            inactiveArrayIndicesEnd[i] = 0;
             for (int u = 0; u < L_; u++) {
-                arrayPointer_P[i][u] = new float[size > 8 ? size : 8];
-                arrayPointer_C[i][u] = new int* [2];
+                arrayPointer_P[i * L_ + u] = new float[size > 8 ? size : 8];
+                arrayPointer_C[i * L_ + u] = new int* [2];
                 for (int j = 0; j < 2; j++) {
-                    arrayPointer_C[i][u][j] = new int[size > 8 ? size : 8];
+                    arrayPointer_C[i * L_ + u][j] = new int[size > 8 ? size : 8];
                 }
-                arrayReferenceCount[i][u] = 0;
-                inactiveArrayIndices[i].push_back(u);
+                arrayReferenceCount[i * L_ + u] = 0;
+                inactiveArrayIndices[i * L_ + inactiveArrayIndicesEnd[i]++] = u;
             }
             size >>= 1;
         }
         for (int i = 0; i < L_; i++) {
             activePath[i] = false;
-            inactivePathIndices.push_back(i);
-            probForks[i] = new float[2];
-            constForks[i] = new bool[2];
+            inactivePathIndices[inactivePathIndicesEnd++] = i;
         }
-
         avxMaskAbs = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
         avxMaskSign = _mm256_castsi256_ps(_mm256_set1_epi32(0x80000000));
     }
     void resetData() {
-        inactivePathIndices.clear();
+        inactivePathIndicesEnd = 0;
         for (int i = 0; i <= m_; i++) {
-            inactiveArrayIndices[i].clear();
+            inactiveArrayIndicesEnd[i] = 0;
             for (int u = 0; u < L_; u++) {
-                arrayReferenceCount[i][u] = 0;
-                inactiveArrayIndices[i].push_back(u);
+                arrayReferenceCount[i * L_ + u] = 0;
+                inactiveArrayIndices[i * L_ + inactiveArrayIndicesEnd[i]++] = u;
             }
         }
         for (int i = 0; i < L_; i++) {
             activePath[i] = false;
-            inactivePathIndices.push_back(i);
+            inactivePathIndices[inactivePathIndicesEnd++] = i;
         }
     }
     int assignInitialPath() {
-        int l = inactivePathIndices.back();
-        inactivePathIndices.pop_back();
+        int l = inactivePathIndices[--inactivePathIndicesEnd];
         activePath[l] = true;
         int s;
         for (int i = 0; i < m_ + 1; i++) {
-            s = inactiveArrayIndices[i].back();
-            inactiveArrayIndices[i].pop_back();
-            pathIndexToArrayIndex[i][l] = s;
-            arrayReferenceCount[i][s] = 1;
+            s = inactiveArrayIndices[i * L_ + (--inactiveArrayIndicesEnd[i])];
+            pathIndexToArrayIndex[i * L_ + l] = s;
+            arrayReferenceCount[i * L_ + s] = 1;
         }
         metric[l] = 0;
         return l;
     }
     int clonePath(int l) {
-        int ll = inactivePathIndices.back();
-        inactivePathIndices.pop_back();
+        int ll = inactivePathIndices[--inactivePathIndicesEnd];
         activePath[ll] = true;
         int s;
         for (int i = 0; i < m_ + 1; i++) {
-            s = pathIndexToArrayIndex[i][l];
-            pathIndexToArrayIndex[i][ll] = s;
-            arrayReferenceCount[i][s]++;
+            s = pathIndexToArrayIndex[i * L_ + l];
+            pathIndexToArrayIndex[i * L_ + ll] = s;
+            arrayReferenceCount[i * L_ + s]++;
         }   
         metric[ll] = metric[l];
         return ll;
     }
     void killPath(int l) {
         activePath[l] = false;
-        inactivePathIndices.push_back(l);
+        inactivePathIndices[inactivePathIndicesEnd++] = l;
         int s;
         for (int i = 0; i < m_ + 1; i++) {
-            s = pathIndexToArrayIndex[i][l];
-            arrayReferenceCount[i][s]--;
-            if (arrayReferenceCount[i][s] == 0) {
-                inactiveArrayIndices[i].push_back(s);
+            s = pathIndexToArrayIndex[i * L_ + l];
+            arrayReferenceCount[i * L_ + s]--;
+            if (arrayReferenceCount[i * L_ + s] == 0) {
+                inactiveArrayIndices[i * L_ + inactiveArrayIndicesEnd[i]++] = s;
             }
         }
     }
     int copyContent(int m, int l) {
         int size = n_ >> m;
         int ss;
-        int s = pathIndexToArrayIndex[m][l];
-        if (arrayReferenceCount[m][s] == 1) {
+        int s = pathIndexToArrayIndex[m * L_ + l];
+        if (arrayReferenceCount[m * L_ + s] == 1) {
             ss = s;
         }
         else {
-            ss = inactiveArrayIndices[m].back();
-            inactiveArrayIndices[m].pop_back();
-            //for (int i = 0; i < size; i++) {
-            //    arrayPointer_P[m][ss][i] = arrayPointer_P[m][s][i];
-            //    arrayPointer_C[m][ss][0][i] = arrayPointer_C[m][s][0][i];
-            //    arrayPointer_C[m][ss][1][i] = arrayPointer_C[m][s][1][i];
-            //}
-            std::copy(arrayPointer_P[m][s], arrayPointer_P[m][s] + size, arrayPointer_P[m][ss]);
-            std::copy(arrayPointer_C[m][s][0], arrayPointer_C[m][s][0] + size, arrayPointer_C[m][ss][0]);
-            std::copy(arrayPointer_C[m][s][1], arrayPointer_C[m][s][1] + size, arrayPointer_C[m][ss][1]);
-            arrayReferenceCount[m][s]--;
-            arrayReferenceCount[m][ss] = 1;
-            pathIndexToArrayIndex[m][l] = ss;
+            ss = inactiveArrayIndices[m * L_ + (--inactiveArrayIndicesEnd[m])];
+            std::copy(arrayPointer_P[m * L_ + s ], arrayPointer_P[m * L_ + s] + size, arrayPointer_P[m * L_ + ss]);
+            std::copy(arrayPointer_C[m * L_ + s][0], arrayPointer_C[m * L_ + s][0] + size, arrayPointer_C[m * L_ + ss][0]);
+            std::copy(arrayPointer_C[m * L_ + s][1], arrayPointer_C[m * L_ + s][1] + size, arrayPointer_C[m * L_ + ss][1]);
+            arrayReferenceCount[m * L_ + s]--;
+            arrayReferenceCount[m * L_ + ss] = 1;
+            pathIndexToArrayIndex[m * L_ + l] = ss;
         }
         
         return ss;
     }
     float* getArrayPointer_P(int m, int l) {
         int ss = copyContent(m, l);
-        return arrayPointer_P[m][ss];
+        return arrayPointer_P[m * L_ + ss];
     }
     int** getArrayPointer_C(int m, int l) {
         int ss = copyContent(m, l);
-        return arrayPointer_C[m][ss];
+        return arrayPointer_C[m * L_ + ss];
     }
 
     void recursivelyCalcP(int m, int phase) {
@@ -251,7 +238,6 @@ namespace SCLDecoderMinsum {
                 cc1 = _mm256_loadu_epi32(c1[0] + u);
                 cc2 = _mm256_loadu_epi32(c1[1] + u);
                 _mm256_storeu_epi32(c2[w % 2] + u, _mm256_xor_si256(cc1, cc2));
-                // _mm256_storeu_epi32(c2[w % 2] + u + size, _mm256_loadu_epi32(c1[1] + u));
             }
             std::copy(c1[1], c1[1] + size, c2[w % 2] + size);
             //for (int u = 0; u < size; u++) {
@@ -264,14 +250,10 @@ namespace SCLDecoderMinsum {
         }
     }
     float additionPM(float llr, char u) {
-        float x = -(1 - 2 * u) * llr;
-        return x >= 0 ? x : 0;
-    }
-
-    bool sortCMP(int a, int b) {
-        return (probForks[a / 2][a % 2] == probForks[b / 2][b % 2]) 
-            ? metric[a] < metric[b] 
-            : probForks[a / 2][a % 2] < probForks[b / 2][b % 2];
+        if (u == 0 && llr < 0 || u == 1 && llr > 0) {
+            return std::abs(llr);
+        }
+        return 0;
     }
 
     void continuePaths_UnfrozenBit(int phase) {
@@ -284,13 +266,10 @@ namespace SCLDecoderMinsum {
         for (int i = 0; i < L_; i++) {
             if (activePath[i]) {
                 Pm = getArrayPointer_P(m_, i);
-                if (Pm[0] == 0) {
-                    Pm = Pm;
-                }
-                probForks[i][0] = metric[i] + additionPM(Pm[0], 0);
-                probForks[i][1] = metric[i] + additionPM(Pm[0], 1);
-                sortedMetric[2 * i] = probForks[i][0];
-                sortedMetric[2 * i + 1] = probForks[i][1];
+                probForks[i] = metric[i] + additionPM(Pm[0], 0);
+                probForks[i + L_] = metric[i] + additionPM(Pm[0], 1);
+                sortedMetric[2 * i] = probForks[i];
+                sortedMetric[2 * i + 1] = probForks[i + L_];
                 activeCount++;
             }
         }
@@ -302,8 +281,8 @@ namespace SCLDecoderMinsum {
                     int ii = clonePath(i);
                     cm = getArrayPointer_C(m_, ii);
                     cm[phase % 2][0] = 1;              
-                    metric[i] = probForks[i][0];
-                    metric[ii] = probForks[i][1];
+                    metric[i] = probForks[i];
+                    metric[ii] = probForks[i + L_];
                 }
             }
         }
@@ -312,56 +291,56 @@ namespace SCLDecoderMinsum {
             float med = sortedMetric[L_];
             int activeCount = 0;
             for (int i = 0; i < L_; i++) {
-                if (probForks[i][0] < med && activeCount < L_) {
-                    constForks[i][0] = true;
+                if (probForks[i] < med && activeCount < L_) {
+                    constForks[i] = true;
                     activeCount++;
                 }
                 else {
-                    constForks[i][0] = false;
+                    constForks[i] = false;
                 }
-                if (probForks[i][1] < med && activeCount < L_) {
-                    constForks[i][1] = true;
+                if (probForks[i + L_] < med && activeCount < L_) {
+                    constForks[i + L_] = true;
                     activeCount++;
                 }
                 else {
-                    constForks[i][1] = false;
+                    constForks[i + L_] = false;
                 }
             }
             for (int i = 0; i < L_ && activeCount < L_; i++) {
-                if (probForks[i][0] == med) {
-                    constForks[i][0] = true;
+                if (probForks[i] == med) {
+                    constForks[i] = true;
                     activeCount++;
                 }
-                if (probForks[i][1] == med && activeCount < L_) {
-                    constForks[i][1] = true;
+                if (probForks[i + L_] == med && activeCount < L_) {
+                    constForks[i + L_] = true;
                     activeCount++;
                 }
             }
             for (int i = 0; i < L_; i++) {
-                if (!constForks[i][0] && !constForks[i][1]) {
+                if (!constForks[i] && !constForks[i + L_]) {
                     killPath(i);
                 }
             }
             for (int i = 0; i < L_; i++) {
-                if (!activePath[i] || (!constForks[i][0] && !constForks[i][1])) {
+                if (!activePath[i] || (!constForks[i] && !constForks[i + L_])) {
                     continue;
                 }
                 cm = getArrayPointer_C(m_, i);
-                if (constForks[i][0] && constForks[i][1]) {
+                if (constForks[i] && constForks[i + L_]) {
                     cm[phase % 2][0] = 0;
                     int ii = clonePath(i);
                     cm = getArrayPointer_C(m_, ii);
                     cm[phase % 2][0] = 1;
-                    metric[i] = probForks[i][0];
-                    metric[ii] = probForks[i][1];
+                    metric[i] = probForks[i];
+                    metric[ii] = probForks[i + L_];
                 }
-                else if (constForks[i][0]) {
+                else if (constForks[i]) {
                     cm[phase % 2][0] = 0;
-                    metric[i] = probForks[i][0];
+                    metric[i] = probForks[i];
                 }
                 else {
                     cm[phase % 2][0] = 1;
-                    metric[i] = probForks[i][1];
+                    metric[i] = probForks[i + L_];
                 }
             }
         }
