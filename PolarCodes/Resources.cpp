@@ -14,6 +14,7 @@ std::random_device r;
 std::seed_seq seed{ r(), r(), r(), r(), r(), r(), r(), r() };
 std::mt19937 eng(seed);
 int* reverseShuffleMem;
+double* reverseShuffleMemDouble;
 
 /*
   Name  : CRC-8
@@ -152,6 +153,18 @@ void ReverseShuffle(int n, int* a) {
     }
     for (int i = 0; i < n; i++) {
         a[i] = reverseShuffleMem[i];
+    }
+    return;
+}
+
+void ReverseShuffle(int n, std::vector<double> &a) {
+    for (int i = 0; i < n; i++) {
+        reverseShuffleMemDouble[i] = i * 2 < n
+            ? a[i * 2]
+            : a[1 + i * 2 - n];
+    }
+    for (int i = 0; i < n; i++) {
+        a[i] = reverseShuffleMemDouble[i];
     }
     return;
 }
