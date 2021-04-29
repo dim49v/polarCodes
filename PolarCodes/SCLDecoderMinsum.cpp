@@ -18,7 +18,7 @@ namespace SCLDecoderMinsum {
     int inactivePathIndicesEnd = 0;
     bool* activePath;
     float** arrayPointer_P;
-    int*** arrayPointer_C;
+    int** arrayPointer_C;
     int* pathIndexToArrayIndex;
     int* inactiveArrayIndices;
     int* inactiveArrayIndicesEnd;
@@ -33,6 +33,9 @@ namespace SCLDecoderMinsum {
     float* metric;
     float* sortedMetric;
     __m256 avxMaskAbs, avxMaskSign;
+    int* dethCW;
+    int* dethP;
+    int* sizeN;
 
     float Decodef(float r1, float r2) {
         return std::min(abs(r1), abs(r2)) * (r1 * r2 < 0 ? -1.f : 1.f);
@@ -65,7 +68,7 @@ namespace SCLDecoderMinsum {
         activePath = new bool[L_];
         arrayReferenceCount = new int [(m_ + 1) * L_];
         arrayPointer_P = new float* [(m_ + 1) * L_];
-        arrayPointer_C = new int** [(m_ + 1) * L_];
+        arrayPointer_C = new int* [(m_ + 1) * L_];
         pathIndexToArrayIndex = new int [(m_ + 1) * L_];
         inactiveArrayIndices = new int[(m_ + 1) * L_];
         inactiveArrayIndicesEnd = new int[m_ + 1];
@@ -73,23 +76,42 @@ namespace SCLDecoderMinsum {
         constForks = new bool [L_ * 2];
         metric = new float[L_];
         sortedMetric = new float[L2_];
+        sizeN = new int[m_ + 1];
         unsigned int size = n;
         for (int i = 0; i < m_ + 1; i++) {
+            sizeN[i] = n >> i;
             inactiveArrayIndicesEnd[i] = 0;
             for (int u = 0; u < L_; u++) {
                 arrayPointer_P[i * L_ + u] = new float[size > 8 ? size : 8];
-                arrayPointer_C[i * L_ + u] = new int* [2];
-                for (int j = 0; j < 2; j++) {
-                    arrayPointer_C[i * L_ + u][j] = new int[size > 8 ? size : 8];
-                }
+                arrayPointer_C[i * L_ + u] = new int[size > 8 ? size : 8];
                 arrayReferenceCount[i * L_ + u] = 0;
                 inactiveArrayIndices[i * L_ + inactiveArrayIndicesEnd[i]++] = u;
+                pathIndexToArrayIndex[i * L_ + u] = -1;
             }
             size >>= 1;
         }
         for (int i = 0; i < L_; i++) {
             activePath[i] = false;
             inactivePathIndices[inactivePathIndicesEnd++] = i;
+        }
+        dethCW = new int[n];
+        dethP = new int[n * m_];
+        bool sw = false;
+        int d, dd, ff;
+        for (int i = 0; i < n; i++) {
+            dd = 1 << m_;
+            ff = i + 1;
+            for (d = m_; ff % dd != 0; d--) {
+                dd >>= 1;
+            };
+            dethCW[i] = d;
+            for (int u = 0; u < m_; u++) {
+                dd = 1 << u;
+                for (d = u; i % dd != 0; d--) {
+                    dd >>= 1;
+                };
+                dethP[u * n + i] = d;
+            }
         }
         avxMaskAbs = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
         avxMaskSign = _mm256_castsi256_ps(_mm256_set1_epi32(0x80000000));
@@ -144,111 +166,145 @@ namespace SCLDecoderMinsum {
             }
         }
     }
-    int copyContent(int m, int l) {
-        int size = n_ >> m;
-        int ss;
-        int s = pathIndexToArrayIndex[m * L_ + l];
-        if (arrayReferenceCount[m * L_ + s] == 1) {
-            ss = s;
-        }
-        else {
-            ss = inactiveArrayIndices[m * L_ + (--inactiveArrayIndicesEnd[m])];
-            std::copy(arrayPointer_P[m * L_ + s ], arrayPointer_P[m * L_ + s] + size, arrayPointer_P[m * L_ + ss]);
-            std::copy(arrayPointer_C[m * L_ + s][0], arrayPointer_C[m * L_ + s][0] + size, arrayPointer_C[m * L_ + ss][0]);
-            std::copy(arrayPointer_C[m * L_ + s][1], arrayPointer_C[m * L_ + s][1] + size, arrayPointer_C[m * L_ + ss][1]);
-            arrayReferenceCount[m * L_ + s]--;
-            arrayReferenceCount[m * L_ + ss] = 1;
-            pathIndexToArrayIndex[m * L_ + l] = ss;
-        }
-        
-        return ss;
-    }
-    float* getArrayPointer_P(int m, int l) {
-        int ss = copyContent(m, l);
-        return arrayPointer_P[m * L_ + ss];
-    }
-    int** getArrayPointer_C(int m, int l) {
-        int ss = copyContent(m, l);
-        return arrayPointer_C[m * L_ + ss];
+
+    int allocate(int m, int l, int L_l) {
+        int t = inactiveArrayIndices[L_l + (--inactiveArrayIndicesEnd[l])];
+        arrayReferenceCount[L_l + t] = 1;
+        pathIndexToArrayIndex[L_l + m] = t;
+        return t;
     }
 
-    void recursivelyCalcP(int m, int phase) {
-        if (m == 0) {
-            return;
+    float* getArrayPointerPW(int m, int l) {
+        int L_l = L_ * l;;
+        int p = pathIndexToArrayIndex[L_l + m];
+        if (p == -1) {  
+            p = allocate(m, l, L_l);
         }
-        int w = phase / 2;
-        if (phase % 2 == 0) {
-            recursivelyCalcP(m - 1, w);
+        else {
+            if (arrayReferenceCount[L_l + p] > 1) {
+                arrayReferenceCount[L_l + p]--;
+                p = allocate(m, l, L_l);
+            }
         }
-        float* p1;
-        float* p2;
-        int** c1;
+        return arrayPointer_P[L_l + p];
+    }  
+
+    float* getArrayPointerPR(int m, int l) {
+        int L_l = L_ * l;
+        return arrayPointer_P[L_l + pathIndexToArrayIndex[L_l + m]];
+    }
+
+    int* getArrayPointerCR(int m, int l) {
+        int L_l = L_ * l;
+        return arrayPointer_C[L_l + pathIndexToArrayIndex[L_l + m]];
+    }
+
+    int* getArrayPointerCW(int m, int l, int f) {
+        int d = dethCW[f];
+        int dd = l - d;
+        int L_dd = L_ * dd;
+        int p = pathIndexToArrayIndex[L_dd + m];
+        if (p == -1) {
+            p = allocate(m, dd, L_dd);
+        }
+        else {
+            if (arrayReferenceCount[L_dd + p] > 1) {
+                arrayReferenceCount[L_dd + p]--;
+                p = allocate(m, dd, L_dd);
+            }
+        }
+        int* c;
+        if (f % 2 == 0) {
+            c = arrayPointer_C[l * L_ + p];
+        } else {
+            c = arrayPointer_C[L_dd + p] + ((1 << d) - 1);
+        }
+        return c;
+    }
+
+    void iterativelyCalcP(int m, int l, int f) {
+        int d = dethP[(l - 1) * n_ + f];
+        int ll = l - d;
+        float* p = getArrayPointerPR(m, ll - 1);
+        int n = sizeN[ll];
+        float* pn = p + n;
+        float* pp;
         __m256 r1, r2, res1;
         __m128 rr;
         __m256i b;
-        for (int i = 0; i < L_; i++) {
-            if (!activePath[i]) {
-                continue;
-            } 
-            int size = n_ >> m;
-            int size2 = size >> 1;
-            p1 = getArrayPointer_P(m, i);
-            p2 = getArrayPointer_P(m - 1, i);
-            c1 = getArrayPointer_C(m, i);
-            if (phase % 2 == 0) {
-                for (int u = 0; u < size; u += 8) {
-                    r1 = _mm256_loadu_ps(p2 + u);
-                    r2 = _mm256_loadu_ps(p2 + size + u);
-                    res1 = f_avx_float(r1, r2);
-                    _mm256_storeu_ps(p1 + u, res1);
-                }
-            } 
-            else {
-                for (int u = 0; u < size; u += 8) {
-                    r1 = _mm256_loadu_ps(p2 + u);
-                    r2 = _mm256_loadu_ps(p2 + size + u); 
-                    b = _mm256_loadu_epi32(c1[0] + u);
-                    res1 = g_avx_float(r1, r2, b);
-                    _mm256_storeu_ps(p1 + u, res1);
-                }
-            }
-            //for (int u = 0; u < size; u++) {
-            //    if (phase % 2 == 0) {
-            //        p1[u] = Decodef(p2[u], p2[size + u]);
-            //    }
-            //    else {
-            //        p1[u] = Decodeg(p2[u], p2[size + u], c1[0][u]);
-            //    }
+        if (f / (1 << d) % 2 == 1) {
+            int* c = getArrayPointerCR(m, ll);
+            pp = getArrayPointerPW(m, ll);
+            //if (n >= 8) {
+                //for (int u = 0; u < n; u += 8) {
+                //    r1 = _mm256_loadu_ps(p + u);
+                //    r2 = _mm256_loadu_ps(pn + u);
+                //    b = _mm256_loadu_epi32(c + u);
+                //    res1 = g_avx_float(r1, r2, b);
+                //    _mm256_storeu_ps(pp + u, res1);
+                //}
             //}
+            //else {
+                for (int i = 0; i < n; i++) {
+                    pp[i] = Decodeg(p[i], p[i + n], c[i]);
+                }
+            //}
+            p = pp;
+            ll++;
+            n >>= 1;
+        }
+        while (ll <= l) {
+            pn = p + n;
+            pp = getArrayPointerPW(m, ll);
+            //if (n >= 8) {
+                //for (int u = 0; u < n; u += 8) {
+                //    r1 = _mm256_loadu_ps(p + u);
+                //    r2 = _mm256_loadu_ps(pn + u);
+                //    res1 = f_avx_float(r1, r2);
+                //    _mm256_storeu_ps(pp + u, res1);
+                //}
+            //}
+            //else {
+                for (int i = 0; i < n; i++) {
+                    pp[i] = Decodef(p[i], p[i + n]);
+                }
+            //}
+            p = pp;
+            ll++;
+            n >>= 1;
         }
     }
-    void recursivelyUpdateC(int m, int phase) {
-        int size = n_ >> m;
-        int w = phase / 2;
-        int** c1;
-        int** c2;
+
+    void iterativelyUpdateC(int m, int l, int f) {
+        int d = dethCW[f];
+        int* ccc = getArrayPointerCW(m, l - d, 0);
+        int n = sizeN[l];
+        ccc += n * ((1 << d) - 2);
+        int* cc = ccc + n; 
+        int ll = l - d;
+        int* c;
         __m256i cc1, cc2;
-        for (int i = 0; i < L_; i++) {
-            if (!activePath[i]) {
-                continue;
-            }
-            c1 = getArrayPointer_C(m, i);
-            c2 = getArrayPointer_C(m - 1, i);
-            for (int u = 0; u < size; u += 8) {
-                cc1 = _mm256_loadu_epi32(c1[0] + u);
-                cc2 = _mm256_loadu_epi32(c1[1] + u);
-                _mm256_storeu_epi32(c2[w % 2] + u, _mm256_xor_si256(cc1, cc2));
-            }
-            std::copy(c1[1], c1[1] + size, c2[w % 2] + size);
-            //for (int u = 0; u < size; u++) {
-            //    c2[w % 2][u] = c1[0][u] ^ c1[1][u];
-            //    c2[w % 2][u + size] = c1[1][u];
+        while (l > ll) {
+            c = getArrayPointerCR(m, l);
+            //if (n >= 8) {
+            //    for (int u = 0; u < n; u += 8) {
+            //        cc1 = _mm256_loadu_epi32(c + u);
+            //        cc2 = _mm256_loadu_epi32(cc + u);
+            //        _mm256_storeu_epi32(ccc + u, _mm256_xor_si256(cc1, cc2));
+            //    }
             //}
-        }
-        if (w % 2 == 1) {
-            recursivelyUpdateC(m - 1, w);
+            //else {
+                for (int i = 0; i < n; i++) {
+                    ccc[i] = c[i] ^ cc[i];
+                }
+            //}
+            n <<= 1;
+            cc = ccc;
+            ccc -= n;
+            l--;
         }
     }
+
     float additionPM(float llr, char u) {
         if (u == 0 && llr < 0 || u == 1 && llr > 0) {
             return std::abs(llr);
@@ -258,14 +314,11 @@ namespace SCLDecoderMinsum {
 
     void continuePaths_UnfrozenBit(int phase) {
         float* Pm;
-        int** cm;
-        if (phase == n_ - 1) {
-            phase = phase;
-        }
+        int* cm;
         int activeCount = 0;
         for (int i = 0; i < L_; i++) {
             if (activePath[i]) {
-                Pm = getArrayPointer_P(m_, i);
+                Pm = getArrayPointerPR(i, m_);
                 probForks[i] = metric[i] + additionPM(Pm[0], 0);
                 probForks[i + L_] = metric[i] + additionPM(Pm[0], 1);
                 sortedMetric[2 * i] = probForks[i];
@@ -273,14 +326,14 @@ namespace SCLDecoderMinsum {
                 activeCount++;
             }
         }
-        if (activeCount < L_) {
+        if (activeCount < L_) {      
             for (int i = 0; i < L_; i++) {
                 if (activePath[i]) {       
-                    cm = getArrayPointer_C(m_, i);
-                    cm[phase % 2][0] = 0;
+                    cm = getArrayPointerCW(i, m_, phase);
+                    cm[0] = 0;
                     int ii = clonePath(i);
-                    cm = getArrayPointer_C(m_, ii);
-                    cm[phase % 2][0] = 1;              
+                    cm = getArrayPointerCW(ii, m_, phase);
+                    cm[0] = 1;              
                     metric[i] = probForks[i];
                     metric[ii] = probForks[i + L_];
                 }
@@ -325,21 +378,21 @@ namespace SCLDecoderMinsum {
                 if (!activePath[i] || (!constForks[i] && !constForks[i + L_])) {
                     continue;
                 }
-                cm = getArrayPointer_C(m_, i);
+                cm = getArrayPointerCW(i, m_, phase);
                 if (constForks[i] && constForks[i + L_]) {
-                    cm[phase % 2][0] = 0;
+                    cm[0] = 0;
                     int ii = clonePath(i);
-                    cm = getArrayPointer_C(m_, ii);
-                    cm[phase % 2][0] = 1;
+                    cm = getArrayPointerCW(ii, m_, phase);
+                    cm[0] = 1;
                     metric[i] = probForks[i];
                     metric[ii] = probForks[i + L_];
                 }
                 else if (constForks[i]) {
-                    cm[phase % 2][0] = 0;
+                    cm[0] = 0;
                     metric[i] = probForks[i];
                 }
                 else {
-                    cm[phase % 2][0] = 1;
+                    cm[0] = 1;
                     metric[i] = probForks[i + L_];
                 }
             }
@@ -347,36 +400,39 @@ namespace SCLDecoderMinsum {
     }
     void Decode(int n, int L, double* c, int** decTree2, int* sol, const std::vector<int>& frozenBits, int qFraction) {
         int l = assignInitialPath();
-        float* pm = getArrayPointer_P(0, l);
-        int** cm;
+        float* pm = getArrayPointerPW(l, 0);
+        int* cm;
         int fraction = 2 << qFraction;
         for (int i = 0; i < n; i++) {
             pm[i] = c[i];
         }
-        for (int i = 0; i < n_; i++) {
-            recursivelyCalcP(m_, i);
-            if (frozenBits[i] != -1) {
-                for (int u = 0; u < L_; u++) {
-                    if (!activePath[u]) {
-                        continue;
+        for (int i = 0; i < n_; i++) {  
+            for (int u = 0; u < L_; u++) {
+                if (activePath[u]) {
+                    iterativelyCalcP(u, m_, i);
+                    if (frozenBits[i] != -1) {
+                        cm = getArrayPointerCW(u, m_, i);
+                        pm = getArrayPointerPR(u, m_);
+                        cm[0] = frozenBits[i];
+                        metric[u] += additionPM(pm[0], frozenBits[i]);
                     }
-                    cm = getArrayPointer_C(m_, u);
-                    pm = getArrayPointer_P(m_, u);
-                    cm[i % 2][0] = frozenBits[i];
-                    metric[u] += additionPM(pm[0], frozenBits[i]);
                 }
             }
-            else {
+            if (frozenBits[i] == -1) {
                 continuePaths_UnfrozenBit(i);
             }
-            if (i % 2 == 1) {
-                recursivelyUpdateC(m_, i);
+            for (int u = 0; u < L_; u++) {
+                if (activePath[u]) {
+                    if (i > 0) {
+                        iterativelyUpdateC(u, m_, i);
+                    }
+                }
             }
         } 
         bool isTrue;
         for (int i = 0; i < L_; i++) { 
-            cm = getArrayPointer_C(0, i);    
-            Encode(n_, cm[0], decTree2, false);
+            cm = getArrayPointerCR(i, 0);    
+            Encode(n_, cm, decTree2, false);
             int j = 0;
             for (int u = 0; u < n_; u++) {
                 if (frozenBits[u] == -1) {      
@@ -407,6 +463,8 @@ namespace SCLDecoderMinsum {
                     crcRes >>= 1;
                 }
                 break;
+            default:
+                isTrue = false;
             }
             if (!isTrue) {
                 continue;
